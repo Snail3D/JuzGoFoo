@@ -20,7 +20,9 @@
   },
   "homepage": "https://github.com/Snail3D/JuzGoFoo#readme",
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.65.0",
     "body-parser": "^2.2.0",
+    "dotenv": "^17.2.3",
     "express": "^5.1.0",
     "multer": "^2.0.2",
     "node-fetch": "^2.7.0",

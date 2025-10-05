@@ -11,20 +11,26 @@ Voice-controlled AI chat interface with intelligent command interpretation.
   - "Compact this" - Toggles compact view
   - "Scroll to top/bottom" - Auto-scrolls
   - "Copy last response" - Copies to clipboard
-- 💬 **Real-time Chat** - WebSocket-based communication with Ollama LLM
+- 💬 **Powered by Claude Sonnet 4.5** - Real AI conversations via Anthropic API
 - 🎨 **Matrix Terminal Theme** - Black background with green CRT effects
 - 🌐 **Cross-Platform** - Works on Mac, Windows, Raspberry Pi, and Linux
 
 ## Prerequisites
 
 - Node.js (v14+)
-- [Ollama](https://ollama.ai) with llama3.2 model installed
+- **Anthropic API Key** - Get one at [console.anthropic.com](https://console.anthropic.com/settings/keys)
 - **Recommended Browser**: Chrome or Edge (for Web Speech API)
 
 ## Installation
 
+1. Install dependencies:
 ```bash
 npm install
+```
+
+2. Create a `.env` file with your API key:
+```bash
+echo "ANTHROPIC_API_KEY=your_api_key_here" > .env
 ```
 
 ## Usage
@@ -33,7 +39,7 @@ npm install
 npm start
 ```
 
-Then open http://localhost:3000 in your browser.
+Then open http://localhost:3000 in your browser and start speaking!
 
 ## How It Works
 
@@ -41,7 +47,7 @@ Then open http://localhost:3000 in your browser.
    - **Primary**: Web Speech API (Chrome/Edge on all platforms)
    - **Fallback**: MediaRecorder API for Firefox/Safari
 2. **Command Interpretation**: Server-side layer detects control commands vs. chat messages
-3. **LLM Processing**: Regular messages sent to Ollama for AI responses
+3. **LLM Processing**: Messages sent to **Claude Sonnet 4.5** via Anthropic API
 4. **Real-time Updates**: WebSocket maintains live connection
 
 ## Cross-Platform Support

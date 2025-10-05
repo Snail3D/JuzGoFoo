@@ -175,6 +175,25 @@ body::before {
   text-shadow: 0 0 5px rgba(255, 200, 0, 0.5);
 }
 
+.message.tool {
+  background: rgba(0, 150, 255, 0.15);
+  color: #00ccff;
+  font-family: 'Courier New', monospace;
+  font-size: 13px;
+  text-align: center;
+  margin: 8px auto;
+  max-width: 80%;
+  border-left: none;
+  border: 1px solid rgba(0, 200, 255, 0.4);
+  text-shadow: 0 0 5px rgba(0, 200, 255, 0.5);
+  animation: toolFlash 0.5s ease-in;
+}
+
+@keyframes toolFlash {
+  0% { opacity: 0; transform: scale(0.95); }
+  100% { opacity: 1; transform: scale(1); }
+}
+
 .input-container {
   padding: 15px;
   background: rgba(0, 20, 0, 0.9);

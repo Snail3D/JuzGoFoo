@@ -5,9 +5,20 @@ const path = require('path');
 const fetch = require('node-fetch');
 const multer = require('multer');
 const fs = require('fs');
+const { exec } = require('child_process');
+const { promisify } = require('util');
+const Anthropic = require('@anthropic-ai/sdk');
+require('dotenv').config();
+
+const execAsync = promisify(exec);
 
 const app = express();
 const PORT = 3000;
+
+// Initialize Claude API
+const anthropic = new Anthropic({
+  apiKey: process.env.ANTHROPIC_API_KEY || 'PLEASE_SET_YOUR_API_KEY'
+});
 
 // Conversation history for context
 const conversationHistory = [];
@@ -40,39 +51,205 @@ function interpretCommand(input) {
   return { isCommand: false, message: input };
 }
 
-// Call Ollama LLM
-async function callLLM(userMessage) {
+// Tool definitions
+const tools = [
+  {
+    name: "read_file",
+    description: "Read the contents of a file",
+    input_schema: {
+      type: "object",
+      properties: {
+        file_path: {
+          type: "string",
+          description: "The absolute path to the file to read"
+        }
+      },
+      required: ["file_path"]
+    }
+  },
+  {
+    name: "write_file",
+    description: "Write content to a file",
+    input_schema: {
+      type: "object",
+      properties: {
+        file_path: {
+          type: "string",
+          description: "The absolute path to the file to write"
+        },
+        content: {
+          type: "string",
+          description: "The content to write to the file"
+        }
+      },
+      required: ["file_path", "content"]
+    }
+  },
+  {
+    name: "execute_bash",
+    description: "Execute a bash command and return the output",
+    input_schema: {
+      type: "object",
+      properties: {
+        command: {
+          type: "string",
+          description: "The bash command to execute"
+        }
+      },
+      required: ["command"]
+    }
+  },
+  {
+    name: "list_files",
+    description: "List files in a directory",
+    input_schema: {
+      type: "object",
+      properties: {
+        directory: {
+          type: "string",
+          description: "The directory path to list files from"
+        }
+      },
+      required: ["directory"]
+    }
+  }
+];
+
+// Tool execution functions
+async function executeTool(toolName, toolInput) {
+  switch (toolName) {
+    case 'read_file':
+      try {
+        const content = fs.readFileSync(toolInput.file_path, 'utf8');
+        return { success: true, content };
+      } catch (error) {
+        return { success: false, error: error.message };
+      }
+
+    case 'write_file':
+      try {
+        fs.writeFileSync(toolInput.file_path, toolInput.content, 'utf8');
+        return { success: true, message: 'File written successfully' };
+      } catch (error) {
+        return { success: false, error: error.message };
+      }
+
+    case 'execute_bash':
+      try {
+        const { stdout, stderr } = await execAsync(toolInput.command);
+        return { success: true, stdout, stderr };
+      } catch (error) {
+        return { success: false, error: error.message, stderr: error.stderr };
+      }
+
+    case 'list_files':
+      try {
+        const files = fs.readdirSync(toolInput.directory);
+        return { success: true, files };
+      } catch (error) {
+        return { success: false, error: error.message };
+      }
+
+    default:
+      return { success: false, error: 'Unknown tool' };
+  }
+}
+
+// Call Claude API with tool support
+async function callLLM(userMessage, ws) {
   // Add user message to history
   conversationHistory.push({ role: 'user', content: userMessage });
 
-  // Build context from last 10 messages
-  const context = conversationHistory.slice(-10).map(msg =>
-    `${msg.role}: ${msg.content}`
-  ).join('\n');
-
-  const prompt = `${context}\nassistant:`;
-
   try {
-    const response = await fetch('http://localhost:11434/api/generate', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: 'llama3.2',
-        prompt: prompt,
-        stream: false,
-        options: { num_predict: 500 }
-      })
-    });
+    let continueLoop = true;
+    let fullResponse = '';
 
-    const data = await response.json();
-    const assistantMessage = data.response.trim();
+    while (continueLoop) {
+      const response = await anthropic.messages.create({
+        model: 'claude-sonnet-4-5-20250929',
+        max_tokens: 4096,
+        tools: tools,
+        system: `You are Claude Sonnet 4.5, integrated into a voice-controlled terminal interface called JuzGoFoo.
 
-    // Add assistant response to history
-    conversationHistory.push({ role: 'assistant', content: assistantMessage });
+You have access to real tools for:
+- Reading files (read_file)
+- Writing files (write_file)
+- Executing bash commands (execute_bash)
+- Listing directory contents (list_files)
 
-    return assistantMessage;
+When users ask you to do something, USE THE TOOLS to actually do it! You can:
+- Create, read, and modify files
+- Run system commands
+- Search for files
+- Execute code
+
+Keep responses concise and conversational since this is a voice interface. When you use tools, briefly explain what you're doing.`,
+        messages: conversationHistory.slice(-20) // Last 20 messages for context
+      });
+
+      // Check if we need to use tools
+      if (response.stop_reason === 'tool_use') {
+        const toolUses = response.content.filter(block => block.type === 'tool_use');
+
+        // Add assistant response with tool uses ONCE
+        conversationHistory.push({
+          role: 'assistant',
+          content: response.content
+        });
+
+        // Execute each tool and collect results
+        const toolResults = [];
+        for (const toolUse of toolUses) {
+          console.log(`Executing tool: ${toolUse.name}`, toolUse.input);
+
+          // Send tool execution notification to client
+          if (ws) {
+            ws.send(JSON.stringify({
+              type: 'tool_execution',
+              tool: toolUse.name,
+              input: toolUse.input
+            }));
+          }
+
+          const result = await executeTool(toolUse.name, toolUse.input);
+
+          toolResults.push({
+            type: 'tool_result',
+            tool_use_id: toolUse.id,
+            content: JSON.stringify(result)
+          });
+        }
+
+        // Add all tool results in one user message
+        conversationHistory.push({
+          role: 'user',
+          content: toolResults
+        });
+      } else {
+        // No more tools to use, extract final response
+        const textContent = response.content.find(block => block.type === 'text');
+        if (textContent) {
+          fullResponse = textContent.text;
+        }
+
+        conversationHistory.push({
+          role: 'assistant',
+          content: response.content
+        });
+
+        continueLoop = false;
+      }
+    }
+
+    return fullResponse;
   } catch (error) {
-    console.error('Ollama error:', error);
+    console.error('Claude API error:', error);
+
+    // Fallback to friendly error message
+    if (error.status === 401) {
+      return "I need an API key to work! Please set your ANTHROPIC_API_KEY in the .env file. Get one at https://console.anthropic.com/settings/keys";
+    }
+
     throw error;
   }
 }
@@ -97,9 +274,9 @@ wss.on('connection', (ws) => {
           original: interpreted.original
         }));
       } else {
-        // Regular message - process with LLM
+        // Regular message - process with LLM and tools
         try {
-          const response = await callLLM(interpreted.message);
+          const response = await callLLM(interpreted.message, ws);
           ws.send(JSON.stringify({
             type: 'message',
             text: interpreted.message,

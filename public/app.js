@@ -41,6 +41,8 @@ ws.onmessage = (event) => {
 
   if (data.type === 'command') {
     handleCommand(data.action, data.original);
+  } else if (data.type === 'tool_execution') {
+    addMessage('tool', `🔧 Executing: ${data.tool}(${JSON.stringify(data.input)})`);
   } else if (data.type === 'message') {
     addMessage('assistant', data.response);
   }
