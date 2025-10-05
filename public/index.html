@@ -12,7 +12,7 @@
       <h1>JuzGoFoo Voice Chat</h1>
       <div class="status">
         <span id="status">Ready</span>
-        <span id="mic-indicator" class="mic-off">🎤</span>
+        <span id="mic-indicator" class="mic-off">●</span>
       </div>
     </div>
 
@@ -21,19 +21,20 @@
     </div>
 
     <div class="input-container">
-      <div class="voice-input-wrapper" ondblclick="toggleVoice()">
+      <div class="voice-input-wrapper">
         <input
           type="text"
           id="messageInput"
-          placeholder="Double-click to speak or type your message..."
-          readonly
+          placeholder="Type or press Enter to speak..."
         />
-        <button id="voiceButton" onclick="toggleVoice()">🎤 Speak</button>
+        <button id="sendButton" onclick="sendMessage()">Send</button>
       </div>
       <div class="controls">
         <button onclick="clearChat()">Clear Chat</button>
         <button onclick="saveChat()">Save Chat</button>
         <button onclick="compactView()">Compact View</button>
+        <button id="wakeWordToggle" onclick="toggleWakeWord()">Wake Word: OFF</button>
+        <button id="conversationalToggle" onclick="toggleConversationalMode()">Conversational: OFF</button>
       </div>
     </div>
   </div>

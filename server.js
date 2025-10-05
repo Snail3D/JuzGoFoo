@@ -8,6 +8,9 @@ const fs = require('fs');
 const { exec } = require('child_process');
 const { promisify } = require('util');
 const Anthropic = require('@anthropic-ai/sdk');
+const NLPHandler = require('./nlp-handler');
+const MemoryManager = require('./memory-manager');
+const LogCompressor = require('./log-compressor');
 require('dotenv').config();
 
 const execAsync = promisify(exec);
@@ -20,6 +23,27 @@ const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY || 'PLEASE_SET_YOUR_API_KEY'
 });
 
+// Initialize NLP Handler
+const nlpHandler = new NLPHandler();
+
+// Initialize Memory Manager
+const memoryManager = new MemoryManager();
+
+// Initialize Log Compressor (saves cloud credits!)
+const logCompressor = new LogCompressor({
+  memoryFile: './conversation-memory.json',
+  compressionThreshold: 10, // Compress after 10 conversations
+  checkInterval: 60000, // Check every minute
+  ollamaModel: 'llama2', // Use llama2, mistral, or phi
+  maxRecentConversations: 5 // Keep 5 most recent uncompressed
+});
+
+// Start log compression service
+logCompressor.start().catch(err => {
+  console.warn('⚠️  Log compressor failed to start:', err.message);
+  console.warn('   Install Ollama to enable: curl -fsSL https://ollama.ai/install.sh | sh');
+});
+
 // Conversation history for context
 const conversationHistory = [];
 
@@ -28,28 +52,6 @@ const upload = multer({ dest: 'uploads/' });
 
 app.use(bodyParser.json());
 app.use(express.static('public'));
-
-// Command interpreter - detects meta-commands from voice input
-function interpretCommand(input) {
-  const lowerInput = input.toLowerCase().trim();
-
-  // Meta-commands that control the interface
-  const commands = {
-    reset: /^(reset|clear|start over|new conversation)/i,
-    save: /^(save|export|download) (this )?chat/i,
-    compact: /^(compact|summarize|condense) (this|the chat)/i,
-    scroll: /^scroll (up|down|to (top|bottom))/i,
-    copy: /^copy (last|previous) (response|message)/i,
-  };
-
-  for (const [action, pattern] of Object.entries(commands)) {
-    if (pattern.test(lowerInput)) {
-      return { isCommand: true, action, original: input };
-    }
-  }
-
-  return { isCommand: false, message: input };
-}
 
 // Tool definitions
 const tools = [
@@ -156,20 +158,20 @@ async function executeTool(toolName, toolInput) {
 }
 
 // Call Claude API with tool support
-async function callLLM(userMessage, ws) {
-  // Add user message to history
-  conversationHistory.push({ role: 'user', content: userMessage });
+async function callLLM(userMessage, ws, nlpContext = null) {
+  // Clear conversation history to avoid context buildup and rate limits
+  conversationHistory.length = 0;
 
-  try {
-    let continueLoop = true;
-    let fullResponse = '';
+  // Use enhanced prompt if available from NLP processing
+  const promptToUse = nlpContext?.enhancedPrompt || userMessage;
+  
+  // Get persistent memory context
+  const memoryContext = memoryManager.getContextPrompt();
+  
+  // Add NLP metadata to system prompt if intent was detected
+  let systemPrompt = `You are Claude Sonnet 4.5, integrated into a voice-controlled terminal interface called JuzGoFoo.
 
-    while (continueLoop) {
-      const response = await anthropic.messages.create({
-        model: 'claude-sonnet-4-5-20250929',
-        max_tokens: 4096,
-        tools: tools,
-        system: `You are Claude Sonnet 4.5, integrated into a voice-controlled terminal interface called JuzGoFoo.
+${memoryContext}
 
 You have access to real tools for:
 - Reading files (read_file)
@@ -183,8 +185,32 @@ When users ask you to do something, USE THE TOOLS to actually do it! You can:
 - Search for files
 - Execute code
 
-Keep responses concise and conversational since this is a voice interface. When you use tools, briefly explain what you're doing.`,
-        messages: conversationHistory.slice(-20) // Last 20 messages for context
+Keep responses concise and conversational since this is a voice interface. When you use tools, briefly explain what you're doing.`;
+
+  if (nlpContext && nlpContext.type === 'task') {
+    systemPrompt += `\n\nNOTE: The user's voice input may contain transcription errors. Here's what we detected:
+- Original input: "${nlpContext.original}"
+- Corrected input: "${nlpContext.corrected}"
+- Detected intent: ${nlpContext.intent} (confidence: ${(nlpContext.confidence * 100).toFixed(1)}%)
+- File paths mentioned: ${nlpContext.filePaths.length > 0 ? nlpContext.filePaths.join(', ') : 'none'}
+
+Be intelligent about interpreting the user's intent even if the transcription isn't perfect.`;
+  }
+
+  // Add user message to history
+  conversationHistory.push({ role: 'user', content: promptToUse });
+
+  try {
+    let continueLoop = true;
+    let fullResponse = '';
+
+    while (continueLoop) {
+      const response = await anthropic.messages.create({
+        model: 'claude-sonnet-4-5-20250929',
+        max_tokens: 4096,
+        tools: tools,
+        system: systemPrompt,
+        messages: conversationHistory
       });
 
       // Check if we need to use tools
@@ -241,6 +267,9 @@ Keep responses concise and conversational since this is a voice interface. When 
       }
     }
 
+    // Store conversation in persistent memory
+    memoryManager.addConversation(userMessage, fullResponse);
+
     return fullResponse;
   } catch (error) {
     console.error('Claude API error:', error);
@@ -264,30 +293,53 @@ wss.on('connection', (ws) => {
     const data = JSON.parse(message);
 
     if (data.type === 'voice_input') {
-      const interpreted = interpretCommand(data.text);
+      // Use NLP handler to interpret the input
+      const interpretation = nlpHandler.interpret(data.text);
+      
+      console.log('NLP Interpretation:', interpretation);
 
-      if (interpreted.isCommand) {
+      // Send interpretation back to client for debugging/feedback
+      ws.send(JSON.stringify({
+        type: 'nlp_debug',
+        interpretation: interpretation
+      }));
+
+      if (interpretation.type === 'meta_command') {
         // Send command back to client for UI control
         ws.send(JSON.stringify({
           type: 'command',
-          action: interpreted.action,
-          original: interpreted.original
+          action: interpretation.action,
+          original: interpretation.original,
+          confidence: interpretation.confidence
         }));
+      } else if (interpretation.type === 'empty') {
+        // Ignore empty input
+        return;
       } else {
-        // Regular message - process with LLM and tools
+        // Regular message or task - process with LLM and tools
         try {
-          const response = await callLLM(interpreted.message, ws);
+          const response = await callLLM(data.text, ws, interpretation);
           ws.send(JSON.stringify({
             type: 'message',
-            text: interpreted.message,
-            response: response
+            text: data.text,
+            response: response,
+            nlp: interpretation
           }));
         } catch (error) {
           console.error('LLM call failed:', error);
+          
+          // Try to provide helpful suggestions
+          const suggestions = nlpHandler.getSuggestions(data.text);
+          let errorMessage = 'Sorry, I encountered an error processing your message.';
+          
+          if (suggestions.length > 0) {
+            errorMessage += '\n\n' + suggestions[0];
+          }
+          
           ws.send(JSON.stringify({
             type: 'message',
-            text: interpreted.message,
-            response: 'Sorry, I encountered an error processing your message.'
+            text: data.text,
+            response: errorMessage
           }));
         }
       }
@@ -329,9 +381,35 @@ app.post('/transcribe', upload.single('audio'), async (req, res) => {
   }
 });
 
+// API endpoint to get compression stats
+app.get('/api/compression-stats', async (req, res) => {
+  const stats = await logCompressor.getStats();
+  res.json(stats);
+});
+
+// Graceful shutdown
+process.on('SIGINT', () => {
+  console.log('\n👋 Shutting down gracefully...');
+  logCompressor.stop();
+  process.exit(0);
+});
+
+process.on('SIGTERM', () => {
+  console.log('\n👋 Shutting down gracefully...');
+  logCompressor.stop();
+  process.exit(0);
+});
+
 app.listen(PORT, () => {
   console.log(`Server running at http://localhost:${PORT}`);
   console.log(`WebSocket server running on port 3001`);
+  console.log(`\n🎤 Voice Recognition Features:`);
+  console.log(`  - Smart NLP with fuzzy matching for imperfect transcriptions`);
+  console.log(`  - Intent detection with confidence scoring`);
+  console.log(`  - Common Whisper error correction`);
+  console.log(`  - File path extraction from voice commands`);
+  console.log(`  - 💾 PERSISTENT MEMORY enabled - remembering context across sessions`);
+  console.log(`  - 🗜️  LOG COMPRESSION enabled - saving cloud credits with local LLM!`);
   console.log(`\nPlatform Compatibility:`);
   console.log(`  - Chrome/Edge: Full support (Web Speech API)`);
   console.log(`  - Firefox/Safari: MediaRecorder fallback`);
