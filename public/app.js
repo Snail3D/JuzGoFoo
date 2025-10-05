@@ -160,7 +160,7 @@ if (useWebSpeech) {
     isWaitingForCommand = true;
     micIndicator.classList.remove('mic-off');
     micIndicator.classList.add('mic-on');
-    updateStatus('Listening for command...');
+    updateStatus('Listening...');
     messageInput.placeholder = 'Listening...';
     console.log('Command recognition started');
   };
@@ -206,9 +206,7 @@ function toggleConversationalMode() {
       toggleWakeWord();
     }
     
-    addMessage('assistant', '🎙️ Conversational mode ON - I\'ll automatically listen after each response. Say your command when you see the mic light up.');
-    
-    // Start listening immediately
+    // Start listening immediately without announcement
     if (useWebSpeech) {
       setTimeout(() => {
         startCommandListening();
@@ -220,8 +218,6 @@ function toggleConversationalMode() {
     conversationalToggle.textContent = 'Conversational: OFF';
     conversationalToggle.style.color = '#00cc00';
     conversationalToggle.style.fontWeight = 'normal';
-    
-    addMessage('assistant', '🎙️ Conversational mode OFF - Use wake word or type to interact.');
     
     // Stop any pending auto-listen
     clearTimeout(autoListenTimeout);
@@ -311,8 +307,8 @@ function stopCommandListening() {
   micIndicator.classList.add('mic-off');
   
   if (conversationalMode) {
-    messageInput.placeholder = 'Conversational mode - auto-listening...';
-    updateStatus('Conversational mode active');
+    messageInput.placeholder = 'Type or speak...';
+    updateStatus('Ready');
   } else if (wakeWordEnabled) {
     messageInput.placeholder = 'Type or say "Hey Foo" to speak...';
     updateStatus('Listening for "Hey Foo"...');
@@ -358,7 +354,7 @@ function addMessage(role, content) {
 }
 
 function handleCommand(action, original) {
-  addMessage('command', `Command: ${original}`);
+  // Don't show command popup anymore
 
   switch (action) {
     case 'reset':
