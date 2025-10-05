@@ -21,7 +21,7 @@ class MemoryManager {
     return {
       context: {
         system_name: "JuzGoFoo",
-        current_app: "Jesco food chat",
+        current_app: "JuzGoFoo",
         session_start: new Date().toISOString(),
         last_updated: new Date().toISOString(),
         conversation_topics: []
@@ -30,7 +30,7 @@ class MemoryManager {
         user_preferences: {},
         recent_conversations: [],
         important_facts: [
-          "This is the Jesco food chat application",
+          "This is the JuzGoFoo voice-controlled terminal application",
           "Running on JuzGoFoo voice-controlled terminal"
         ]
       }

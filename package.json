@@ -1,7 +1,7 @@
 {
   "name": "juzgofoo",
-  "version": "1.0.0",
-  "description": "A new project.",
+  "version": "0.6.0",
+  "description": "A voice-controlled terminal interface with AI assistance.",
   "main": "index.js",
   "scripts": {
     "start": "node server.js",
