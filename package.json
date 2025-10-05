@@ -1,0 +1,27 @@
+{
+  "name": "juzgofoo",
+  "version": "1.0.0",
+  "description": "A new project.",
+  "main": "index.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Snail3D/JuzGoFoo.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/Snail3D/JuzGoFoo/issues"
+  },
+  "homepage": "https://github.com/Snail3D/JuzGoFoo#readme",
+  "dependencies": {
+    "body-parser": "^2.2.0",
+    "express": "^5.1.0",
+    "ws": "^8.18.3"
+  }
+}
