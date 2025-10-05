@@ -2,7 +2,7 @@ const express = require('express');
 const WebSocket = require('ws');
 const bodyParser = require('body-parser');
 const path = require('path');
-const { exec } = require('child_process');
+const fetch = require('node-fetch');
 
 const app = express();
 const PORT = 3000;
@@ -37,45 +37,39 @@ function interpretCommand(input) {
 
 // Call Ollama LLM
 async function callLLM(userMessage) {
-  return new Promise((resolve, reject) => {
-    // Add user message to history
-    conversationHistory.push({ role: 'user', content: userMessage });
+  // Add user message to history
+  conversationHistory.push({ role: 'user', content: userMessage });
 
-    // Build context from last 10 messages
-    const context = conversationHistory.slice(-10).map(msg =>
-      `${msg.role}: ${msg.content}`
-    ).join('\n');
+  // Build context from last 10 messages
+  const context = conversationHistory.slice(-10).map(msg =>
+    `${msg.role}: ${msg.content}`
+  ).join('\n');
 
-    const prompt = `${context}\nassistant:`;
+  const prompt = `${context}\nassistant:`;
 
-    const ollamaCommand = `curl -s http://localhost:11434/api/generate -d '{
-      "model": "llama3.2",
-      "prompt": ${JSON.stringify(prompt)},
-      "stream": false,
-      "options": {"num_predict": 500}
-    }'`;
-
-    exec(ollamaCommand, { maxBuffer: 1024 * 1024 * 10 }, (error, stdout, stderr) => {
-      if (error) {
-        console.error('Ollama error:', error);
-        reject(error);
-        return;
-      }
-
-      try {
-        const response = JSON.parse(stdout);
-        const assistantMessage = response.response.trim();
-
-        // Add assistant response to history
-        conversationHistory.push({ role: 'assistant', content: assistantMessage });
-
-        resolve(assistantMessage);
-      } catch (e) {
-        console.error('Parse error:', e);
-        reject(e);
-      }
+  try {
+    const response = await fetch('http://localhost:11434/api/generate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'llama3.2',
+        prompt: prompt,
+        stream: false,
+        options: { num_predict: 500 }
+      })
     });
-  });
+
+    const data = await response.json();
+    const assistantMessage = data.response.trim();
+
+    // Add assistant response to history
+    conversationHistory.push({ role: 'assistant', content: assistantMessage });
+
+    return assistantMessage;
+  } catch (error) {
+    console.error('Ollama error:', error);
+    throw error;
+  }
 }
 
 // WebSocket server for real-time communication

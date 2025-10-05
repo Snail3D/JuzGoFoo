@@ -5,8 +5,8 @@ const ws = new WebSocket('ws://localhost:3001');
 const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
 const recognition = new SpeechRecognition();
 
-recognition.continuous = false;
-recognition.interimResults = false;
+recognition.continuous = true;
+recognition.interimResults = true;
 recognition.lang = 'en-US';
 
 let isListening = false;
@@ -56,9 +56,18 @@ recognition.onstart = () => {
 };
 
 recognition.onresult = (event) => {
-  const transcript = event.results[0][0].transcript;
-  messageInput.value = transcript;
-  sendMessage(transcript);
+  const results = event.results;
+  const lastResult = results[results.length - 1];
+
+  if (lastResult.isFinal) {
+    const transcript = lastResult[0].transcript;
+    messageInput.value = transcript;
+    sendMessage(transcript);
+  } else {
+    // Show interim results
+    const interim = lastResult[0].transcript;
+    messageInput.value = interim + '...';
+  }
 };
 
 recognition.onerror = (event) => {
@@ -68,7 +77,10 @@ recognition.onerror = (event) => {
 };
 
 recognition.onend = () => {
-  stopListening();
+  // Auto-restart if still in listening mode
+  if (isListening) {
+    recognition.start();
+  }
 };
 
 // Functions
