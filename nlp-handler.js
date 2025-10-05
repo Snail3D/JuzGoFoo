@@ -142,7 +142,7 @@ class NLPHandler {
    */
   detectMetaCommand(text) {
     const corrected = this.correctWhisperErrors(text);
-    const threshold = 0.7;
+    const threshold = 0.85; // Increased from 0.7 to make reset less sensitive
     
     for (const [command, patterns] of Object.entries(this.metaCommands)) {
       for (const pattern of patterns) {
