@@ -1,0 +1,3 @@
+# JuzGoFoo
+
+A new project.
