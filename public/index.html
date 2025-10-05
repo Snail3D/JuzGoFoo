@@ -20,6 +20,14 @@
       <!-- Messages will be added here -->
     </div>
 
+    <!-- Drag and drop overlay -->
+    <div id="dropOverlay" class="drop-overlay">
+      <div class="drop-message">
+        <p>📁 Drop file(s) here</p>
+        <small>Images, code files, folders, etc.</small>
+      </div>
+    </div>
+
     <div class="input-container">
       <div class="voice-input-wrapper">
         <input
@@ -35,6 +43,11 @@
         <button onclick="compactView()">Compact View</button>
         <button id="wakeWordToggle" onclick="toggleWakeWord()">Wake Word: OFF</button>
         <button id="conversationalToggle" onclick="toggleConversationalMode()">Conversational: OFF</button>
+        <button id="muteToggle" onclick="toggleMute()">🔊 Sound: ON</button>
+        <button id="speedToggle" onclick="toggleSpeed()">⚡ Speed: Normal</button>
+        <select id="voiceSelect" onchange="changeVoice()" style="padding: 10px; border-radius: 5px; border: 1px solid #666; background: #1a1a1a; color: #fff;">
+          <option value="">Loading voices...</option>
+        </select>
       </div>
       <div class="controls server-controls">
         <button onclick="shutdownServer()">🛑 Shutdown</button>

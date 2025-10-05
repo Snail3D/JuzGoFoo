@@ -28,7 +28,7 @@ if (SpeechRecognition) {
 }
 
 let isListening = false;
-let wakeWordEnabled = true;
+let wakeWordEnabled = false;
 let conversationalMode = false;
 let isWaitingForCommand = false;
 let wakeWordRestartTimeout = null;

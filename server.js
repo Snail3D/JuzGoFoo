@@ -52,6 +52,16 @@ const upload = multer({ dest: 'uploads/' });
 app.use(bodyParser.json());
 app.use(express.static('public'));
 
+// Text-to-speech function
+async function speak(text) {
+  try {
+    // Use macOS 'say' command with faster voice and better quality
+    await execAsync(`say -v Samantha -r 200 "${text.replace(/"/g, '\\"')}"`);
+  } catch (error) {
+    console.error('TTS error:', error.message);
+  }
+}
+
 // Tool definitions
 const tools = [
   {
@@ -189,7 +199,7 @@ When users ask you to do something, USE THE TOOLS to actually do it! You can:
 - Search for files
 - Execute code
 
-Keep responses concise and conversational since this is a voice interface. When you use tools, briefly explain what you're doing.`;
+Keep responses SHORT and conversational since this is a VOICE interface. Aim for 1-2 sentences max when possible.`;
 
   if (nlpContext && nlpContext.type === 'task') {
     systemPrompt += `\n\nNOTE: The user's voice input may contain transcription errors. Here's what we detected:
@@ -207,67 +217,81 @@ Be intelligent about interpreting the user's intent even if the transcription is
   try {
     let continueLoop = true;
     let fullResponse = '';
+    let retryCount = 0;
+    const maxRetries = 3;
 
-    while (continueLoop) {
-      const response = await anthropic.messages.create({
-        model: 'claude-sonnet-4-5-20250929',
-        max_tokens: 4096,
-        tools: tools,
-        system: systemPrompt,
-        messages: conversationHistory
-      });
-
-      // Check if we need to use tools
-      if (response.stop_reason === 'tool_use') {
-        const toolUses = response.content.filter(block => block.type === 'tool_use');
-
-        // Add assistant response with tool uses ONCE
-        conversationHistory.push({
-          role: 'assistant',
-          content: response.content
+    while (continueLoop && retryCount < maxRetries) {
+      try {
+        const response = await anthropic.messages.create({
+          model: 'claude-sonnet-4-5-20250929',
+          max_tokens: 4096,
+          tools: tools,
+          system: systemPrompt,
+          messages: conversationHistory
         });
 
-        // Execute each tool and collect results
-        const toolResults = [];
-        for (const toolUse of toolUses) {
-          console.log(`Executing tool: ${toolUse.name}`, toolUse.input);
+        // Check if we need to use tools
+        if (response.stop_reason === 'tool_use') {
+          const toolUses = response.content.filter(block => block.type === 'tool_use');
 
-          // Send tool execution notification to client
-          if (ws) {
-            ws.send(JSON.stringify({
-              type: 'tool_execution',
-              tool: toolUse.name,
-              input: toolUse.input
-            }));
+          // Add assistant response with tool uses ONCE
+          conversationHistory.push({
+            role: 'assistant',
+            content: response.content
+          });
+
+          // Execute each tool and collect results
+          const toolResults = [];
+          for (const toolUse of toolUses) {
+            console.log(`Executing tool: ${toolUse.name}`, toolUse.input);
+
+            // Send tool execution notification to client
+            if (ws) {
+              ws.send(JSON.stringify({
+                type: 'tool_execution',
+                tool: toolUse.name,
+                input: toolUse.input
+              }));
+            }
+
+            const result = await executeTool(toolUse.name, toolUse.input);
+
+            toolResults.push({
+              type: 'tool_result',
+              tool_use_id: toolUse.id,
+              content: JSON.stringify(result)
+            });
           }
 
-          const result = await executeTool(toolUse.name, toolUse.input);
-
-          toolResults.push({
-            type: 'tool_result',
-            tool_use_id: toolUse.id,
-            content: JSON.stringify(result)
+          // Add all tool results in one user message
+          conversationHistory.push({
+            role: 'user',
+            content: toolResults
           });
+        } else {
+          // No more tools to use, extract final response
+          const textContent = response.content.find(block => block.type === 'text');
+          if (textContent) {
+            fullResponse = textContent.text;
+          }
+
+          conversationHistory.push({
+            role: 'assistant',
+            content: response.content
+          });
+
+          continueLoop = false;
         }
-
-        // Add all tool results in one user message
-        conversationHistory.push({
-          role: 'user',
-          content: toolResults
-        });
-      } else {
-        // No more tools to use, extract final response
-        const textContent = response.content.find(block => block.type === 'text');
-        if (textContent) {
-          fullResponse = textContent.text;
+      } catch (innerError) {
+        retryCount++;
+        console.error(`API call attempt ${retryCount} failed:`, innerError.message);
+        
+        if (retryCount >= maxRetries) {
+          throw innerError;
         }
-
-        conversationHistory.push({
-          role: 'assistant',
-          content: response.content
-        });
-
-        continueLoop = false;
+        
+        // Wait before retrying
+        await new Promise(resolve => setTimeout(resolve, 1000 * retryCount));
       }
     }
 
@@ -283,10 +307,10 @@ Be intelligent about interpreting the user's intent even if the transcription is
 
     // Fallback to friendly error message
     if (error.status === 401) {
-      return "I need an API key to work! Please set your ANTHROPIC_API_KEY in the .env file. Get one at https://console.anthropic.com/settings/keys";
+      return "I need an API key to work! Please set your ANTHROPIC_API_KEY in the .env file.";
     }
 
-    throw error;
+    return "Sorry, I'm having trouble right now. Let me try again.";
   }
 }
 
@@ -326,28 +350,30 @@ wss.on('connection', (ws) => {
         // Regular message or task - process with LLM and tools
         try {
           const response = await callLLM(data.text, ws, interpretation);
+          
+          // Send response to client
           ws.send(JSON.stringify({
             type: 'message',
             text: data.text,
             response: response,
             nlp: interpretation
           }));
+          
+          // Speak the response
+          await speak(response);
+          
         } catch (error) {
           console.error('LLM call failed:', error);
           
-          // Try to provide helpful suggestions
-          const suggestions = nlpHandler.getSuggestions(data.text);
-          let errorMessage = 'Sorry, I encountered an error processing your message.';
-          
-          if (suggestions.length > 0) {
-            errorMessage += '\n\n' + suggestions[0];
-          }
+          const errorMessage = "I'm having trouble. Let me keep trying.";
           
           ws.send(JSON.stringify({
             type: 'message',
             text: data.text,
             response: errorMessage
           }));
+          
+          await speak(errorMessage);
         }
       }
     }
@@ -412,6 +438,7 @@ app.listen(PORT, async () => {
   console.log(`  - 💾 PERSISTENT MEMORY enabled - remembering context across sessions`);
   console.log(`  - 🗜️  LOG COMPRESSION - using local LLM (saving cloud credits!)`);
   console.log(`  - 🔍 CONTEXT EXTRACTION - organized data for Claude Sonnet 4.5`);
+  console.log(`  - 🔊 TEXT-TO-SPEECH enabled - voice responses!`);
   console.log(`\nPlatform Compatibility:`);
   console.log(`  - Chrome/Edge: Full support (Web Speech API)`);
   console.log(`  - Firefox/Safari: MediaRecorder fallback`);
