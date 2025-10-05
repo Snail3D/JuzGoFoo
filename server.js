@@ -11,6 +11,7 @@ const Anthropic = require('@anthropic-ai/sdk');
 const NLPHandler = require('./nlp-handler');
 const MemoryManager = require('./memory-manager');
 const LogCompressor = require('./log-compressor');
+const ContextMonitor = require('./context-monitor');
 require('dotenv').config();
 
 const execAsync = promisify(exec);
@@ -31,17 +32,15 @@ const memoryManager = new MemoryManager();
 
 // Initialize Log Compressor (saves cloud credits!)
 const logCompressor = new LogCompressor({
-  memoryFile: './conversation-memory.json',
-  compressionThreshold: 10, // Compress after 10 conversations
-  checkInterval: 60000, // Check every minute
-  ollamaModel: 'llama2', // Use llama2, mistral, or phi
-  maxRecentConversations: 5 // Keep 5 most recent uncompressed
+  compressionThreshold: 10,
+  checkInterval: 120000, // check every 2 minutes
+  ollamaModel: 'llama2'
 });
 
-// Start log compression service
-logCompressor.start().catch(err => {
-  console.warn('⚠️  Log compressor failed to start:', err.message);
-  console.warn('   Install Ollama to enable: curl -fsSL https://ollama.ai/install.sh | sh');
+// Initialize Context Monitor (extracts organized data for Claude)
+const contextMonitor = new ContextMonitor({
+  ollamaModel: 'mistral', // better for JSON
+  messagesBeforeExtract: 3
 });
 
 // Conversation history for context
@@ -168,10 +167,15 @@ async function callLLM(userMessage, ws, nlpContext = null) {
   // Get persistent memory context
   const memoryContext = memoryManager.getContextPrompt();
   
+  // Get extracted context from local LLM monitoring
+  const extractedContext = await contextMonitor.getContextForClaude();
+  
   // Add NLP metadata to system prompt if intent was detected
   let systemPrompt = `You are Claude Sonnet 4.5, integrated into a voice-controlled terminal interface called JuzGoFoo.
 
 ${memoryContext}
+
+${extractedContext}
 
 You have access to real tools for:
 - Reading files (read_file)
@@ -269,6 +273,9 @@ Be intelligent about interpreting the user's intent even if the transcription is
 
     // Store conversation in persistent memory
     memoryManager.addConversation(userMessage, fullResponse);
+    
+    // Monitor conversation for context extraction (local LLM)
+    await contextMonitor.onMessage(userMessage, fullResponse);
 
     return fullResponse;
   } catch (error) {
@@ -381,26 +388,20 @@ app.post('/transcribe', upload.single('audio'), async (req, res) => {
   }
 });
 
-// API endpoint to get compression stats
-app.get('/api/compression-stats', async (req, res) => {
-  const stats = await logCompressor.getStats();
-  res.json(stats);
-});
+// Initialize services
+async function initializeServices() {
+  console.log('\n🚀 Initializing services...\n');
+  
+  // Start log compressor
+  await logCompressor.start();
+  
+  // Initialize context monitor
+  await contextMonitor.initialize();
+  
+  console.log('\n✅ All services initialized\n');
+}
 
-// Graceful shutdown
-process.on('SIGINT', () => {
-  console.log('\n👋 Shutting down gracefully...');
-  logCompressor.stop();
-  process.exit(0);
-});
-
-process.on('SIGTERM', () => {
-  console.log('\n👋 Shutting down gracefully...');
-  logCompressor.stop();
-  process.exit(0);
-});
-
-app.listen(PORT, () => {
+app.listen(PORT, async () => {
   console.log(`Server running at http://localhost:${PORT}`);
   console.log(`WebSocket server running on port 3001`);
   console.log(`\n🎤 Voice Recognition Features:`);
@@ -409,9 +410,20 @@ app.listen(PORT, () => {
   console.log(`  - Common Whisper error correction`);
   console.log(`  - File path extraction from voice commands`);
   console.log(`  - 💾 PERSISTENT MEMORY enabled - remembering context across sessions`);
-  console.log(`  - 🗜️  LOG COMPRESSION enabled - saving cloud credits with local LLM!`);
+  console.log(`  - 🗜️  LOG COMPRESSION - using local LLM (saving cloud credits!)`);
+  console.log(`  - 🔍 CONTEXT EXTRACTION - organized data for Claude Sonnet 4.5`);
   console.log(`\nPlatform Compatibility:`);
   console.log(`  - Chrome/Edge: Full support (Web Speech API)`);
   console.log(`  - Firefox/Safari: MediaRecorder fallback`);
   console.log(`  - Raspberry Pi: Use Chrome/Chromium for best results`);
+  
+  // Initialize background services
+  await initializeServices();
+});
+
+// Graceful shutdown
+process.on('SIGINT', () => {
+  console.log('\n👋 Shutting down gracefully...');
+  logCompressor.stop();
+  process.exit(0);
 });
