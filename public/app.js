@@ -1,13 +1,24 @@
 // WebSocket connection
 const ws = new WebSocket('ws://localhost:3001');
 
-// Speech recognition setup
+// Speech recognition setup - try Web Speech API first
 const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-const recognition = new SpeechRecognition();
+let recognition = null;
+let useWebSpeech = false;
+let mediaRecorder = null;
+let audioChunks = [];
 
-recognition.continuous = true;
-recognition.interimResults = true;
-recognition.lang = 'en-US';
+// Check if Web Speech API is available
+if (SpeechRecognition) {
+  recognition = new SpeechRecognition();
+  recognition.continuous = true;
+  recognition.interimResults = true;
+  recognition.lang = 'en-US';
+  useWebSpeech = true;
+  console.log('Using Web Speech API');
+} else {
+  console.log('Using MediaRecorder + server-side transcription');
+}
 
 let isListening = false;
 const chatContainer = document.getElementById('chatContainer');
@@ -44,56 +55,126 @@ ws.onclose = () => {
   updateStatus('Disconnected');
 };
 
-// Voice recognition handlers
-recognition.onstart = () => {
-  isListening = true;
-  voiceButton.classList.add('listening');
-  voiceButton.textContent = '🔴 Listening...';
-  micIndicator.classList.remove('mic-off');
-  micIndicator.classList.add('mic-on');
-  updateStatus('Listening...');
-  messageInput.value = '';
-};
+// Voice recognition handlers - only set if using Web Speech API
+if (useWebSpeech) {
+  recognition.onstart = () => {
+    isListening = true;
+    voiceButton.classList.add('listening');
+    voiceButton.textContent = '🔴 Listening...';
+    micIndicator.classList.remove('mic-off');
+    micIndicator.classList.add('mic-on');
+    updateStatus('Listening...');
+    messageInput.value = '';
+  };
 
-recognition.onresult = (event) => {
-  const results = event.results;
-  const lastResult = results[results.length - 1];
+  recognition.onresult = (event) => {
+    const results = event.results;
+    const lastResult = results[results.length - 1];
 
-  if (lastResult.isFinal) {
-    const transcript = lastResult[0].transcript;
-    messageInput.value = transcript;
-    sendMessage(transcript);
-  } else {
-    // Show interim results
-    const interim = lastResult[0].transcript;
-    messageInput.value = interim + '...';
-  }
-};
+    if (lastResult.isFinal) {
+      const transcript = lastResult[0].transcript;
+      messageInput.value = transcript;
+      sendMessage(transcript);
+    } else {
+      // Show interim results
+      const interim = lastResult[0].transcript;
+      messageInput.value = interim + '...';
+    }
+  };
 
-recognition.onerror = (event) => {
-  console.error('Speech recognition error:', event.error);
-  updateStatus(`Error: ${event.error}`);
-  stopListening();
-};
+  recognition.onerror = (event) => {
+    console.error('Speech recognition error:', event.error);
+    updateStatus(`Error: ${event.error}`);
+    stopListening();
+  };
 
-recognition.onend = () => {
-  // Auto-restart if still in listening mode
-  if (isListening) {
-    recognition.start();
-  }
-};
+  recognition.onend = () => {
+    // Auto-restart if still in listening mode
+    if (isListening) {
+      recognition.start();
+    }
+  };
+}
 
 // Functions
-function toggleVoice() {
+async function toggleVoice() {
   if (isListening) {
-    recognition.stop();
+    stopListening();
   } else {
-    recognition.start();
+    if (useWebSpeech) {
+      recognition.start();
+    } else {
+      await startMediaRecorder();
+    }
+  }
+}
+
+async function startMediaRecorder() {
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    mediaRecorder = new MediaRecorder(stream);
+    audioChunks = [];
+
+    mediaRecorder.ondataavailable = (event) => {
+      audioChunks.push(event.data);
+    };
+
+    mediaRecorder.onstop = async () => {
+      const audioBlob = new Blob(audioChunks, { type: 'audio/wav' });
+      const formData = new FormData();
+      formData.append('audio', audioBlob);
+
+      // Send to server for transcription
+      const response = await fetch('/transcribe', {
+        method: 'POST',
+        body: formData
+      });
+
+      const result = await response.json();
+      if (result.text) {
+        messageInput.value = result.text;
+        sendMessage(result.text);
+      }
+
+      // Restart if still listening
+      if (isListening) {
+        setTimeout(() => startMediaRecorder(), 100);
+      }
+    };
+
+    mediaRecorder.start();
+
+    // Stop after 5 seconds to process, then restart
+    setTimeout(() => {
+      if (mediaRecorder && mediaRecorder.state === 'recording') {
+        mediaRecorder.stop();
+      }
+    }, 5000);
+
+    isListening = true;
+    voiceButton.classList.add('listening');
+    voiceButton.textContent = '🔴 Listening...';
+    micIndicator.classList.remove('mic-off');
+    micIndicator.classList.add('mic-on');
+    updateStatus('Listening...');
+    messageInput.value = '';
+
+  } catch (error) {
+    console.error('Microphone access error:', error);
+    updateStatus('Microphone access denied');
   }
 }
 
 function stopListening() {
   isListening = false;
+
+  if (useWebSpeech && recognition) {
+    recognition.stop();
+  } else if (mediaRecorder && mediaRecorder.state === 'recording') {
+    mediaRecorder.stop();
+    mediaRecorder.stream.getTracks().forEach(track => track.stop());
+  }
+
   voiceButton.classList.remove('listening');
   voiceButton.textContent = '🎤 Speak';
   micIndicator.classList.remove('mic-on');

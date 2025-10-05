@@ -12,12 +12,14 @@ Voice-controlled AI chat interface with intelligent command interpretation.
   - "Scroll to top/bottom" - Auto-scrolls
   - "Copy last response" - Copies to clipboard
 - 💬 **Real-time Chat** - WebSocket-based communication with Ollama LLM
-- 🎨 **Beautiful UI** - Modern gradient design with voice indicators
+- 🎨 **Matrix Terminal Theme** - Black background with green CRT effects
+- 🌐 **Cross-Platform** - Works on Mac, Windows, Raspberry Pi, and Linux
 
 ## Prerequisites
 
 - Node.js (v14+)
 - [Ollama](https://ollama.ai) with llama3.2 model installed
+- **Recommended Browser**: Chrome or Edge (for Web Speech API)
 
 ## Installation
 
@@ -35,10 +37,22 @@ Then open http://localhost:3000 in your browser.
 
 ## How It Works
 
-1. **Voice Input**: Uses Web Speech API (built into Chrome/Safari)
+1. **Voice Input**:
+   - **Primary**: Web Speech API (Chrome/Edge on all platforms)
+   - **Fallback**: MediaRecorder API for Firefox/Safari
 2. **Command Interpretation**: Server-side layer detects control commands vs. chat messages
 3. **LLM Processing**: Regular messages sent to Ollama for AI responses
 4. **Real-time Updates**: WebSocket maintains live connection
+
+## Cross-Platform Support
+
+| Platform | Browser | Voice Input | Status |
+|----------|---------|-------------|--------|
+| **Mac** | Chrome/Edge | Web Speech API | ✅ Full Support |
+| **Mac** | Firefox/Safari | MediaRecorder | ⚠️ Limited |
+| **Windows** | Chrome/Edge | Web Speech API | ✅ Full Support |
+| **Linux** | Chrome/Chromium | Web Speech API | ✅ Full Support |
+| **Raspberry Pi** | Chromium | Web Speech API | ✅ Full Support |
 
 ## Voice Commands
 

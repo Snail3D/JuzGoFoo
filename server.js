@@ -3,12 +3,17 @@ const WebSocket = require('ws');
 const bodyParser = require('body-parser');
 const path = require('path');
 const fetch = require('node-fetch');
+const multer = require('multer');
+const fs = require('fs');
 
 const app = express();
 const PORT = 3000;
 
 // Conversation history for context
 const conversationHistory = [];
+
+// Set up multer for audio file uploads
+const upload = multer({ dest: 'uploads/' });
 
 app.use(bodyParser.json());
 app.use(express.static('public'));
@@ -121,7 +126,37 @@ app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
+// Transcription endpoint for cross-platform audio
+app.post('/transcribe', upload.single('audio'), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: 'No audio file provided' });
+    }
+
+    // For now, return a placeholder - you can integrate Whisper API here
+    // Options: OpenAI Whisper API, Groq Whisper, or local Whisper.cpp
+    console.log('Received audio for transcription:', req.file.path);
+
+    // Clean up the uploaded file
+    fs.unlinkSync(req.file.path);
+
+    // Placeholder response - integrate real transcription service
+    res.json({
+      text: 'Cross-platform transcription coming soon - use Chrome for Web Speech API',
+      method: 'mediarecorder'
+    });
+
+  } catch (error) {
+    console.error('Transcription error:', error);
+    res.status(500).json({ error: 'Transcription failed' });
+  }
+});
+
 app.listen(PORT, () => {
   console.log(`Server running at http://localhost:${PORT}`);
   console.log(`WebSocket server running on port 3001`);
+  console.log(`\nPlatform Compatibility:`);
+  console.log(`  - Chrome/Edge: Full support (Web Speech API)`);
+  console.log(`  - Firefox/Safari: MediaRecorder fallback`);
+  console.log(`  - Raspberry Pi: Use Chrome/Chromium for best results`);
 });
